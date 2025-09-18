@@ -17,6 +17,8 @@ import Logo from "./Logo";
 import useUser from "./useUser";
 import { buildUrl } from "./utils";
 import useAllWorkspaces from "@/plugins/comet/useAllWorkspaces";
+import useOrganizations from "./useOrganizations";
+import { ORGANIZATION_ROLE_TYPE } from "./types";
 
 type WorkspacePreloaderProps = {
   children: React.ReactNode;
@@ -28,6 +30,10 @@ const WorkspacePreloader: React.FunctionComponent<WorkspacePreloaderProps> = ({
   const { data: user, isLoading } = useUser();
 
   const { data: allWorkspaces } = useAllWorkspaces({
+    enabled: !!user?.loggedIn,
+  });
+
+  const { data: organizations } = useOrganizations({
     enabled: !!user?.loggedIn,
   });
 
@@ -63,6 +69,15 @@ const WorkspacePreloader: React.FunctionComponent<WorkspacePreloaderProps> = ({
     : null;
 
   if (workspace) {
+    const workspaceOrganization = organizations?.find(
+      (organization) => organization.id === workspace.organizationId,
+    );
+
+    if (workspaceOrganization?.role === ORGANIZATION_ROLE_TYPE.emAndMPMOnly) {
+      window.location.href = buildUrl(workspace.workspaceName);
+      return null;
+    }
+
     useAppStore.getState().setActiveWorkspaceName(workspace.workspaceName);
   } else {
     const defaultWorkspace =
@@ -70,6 +85,15 @@ const WorkspacePreloader: React.FunctionComponent<WorkspacePreloaderProps> = ({
       allWorkspaces?.[0];
 
     if (defaultWorkspace) {
+      const workspaceOrganization = organizations?.find(
+        (organization) => organization.id === defaultWorkspace.organizationId,
+      );
+
+      if (workspaceOrganization?.role === ORGANIZATION_ROLE_TYPE.emAndMPMOnly) {
+        window.location.href = buildUrl(defaultWorkspace.workspaceName);
+        return null;
+      }
+
       if (isRootPath) {
         useAppStore
           .getState()
