@@ -88,7 +88,7 @@ const getAnnotationQueuesList = async (
         created_by: "admin@company.com",
         last_updated_at: "2024-01-18T14:22:17.456Z",
         last_updated_by: "sarah.johnson",
-        last_scorred_at: "2024-01-18T16:45:32.789Z",
+        last_scored_at: "2024-01-18T16:45:32.789Z",
       },
       {
         id: "ann_queue_9k2m1n5p-6c8d-7e4a-3f9b-2a1c5e8d9f0b",
@@ -130,7 +130,7 @@ const getAnnotationQueuesList = async (
         created_by: "admin@company.com",
         last_updated_at: "2024-01-19T10:30:42.123Z",
         last_updated_by: "mike.chen",
-        last_scorred_at: "2024-01-19T15:20:18.567Z",
+        last_scored_at: "2024-01-19T15:20:18.567Z",
       },
     ],
     sortable_by: [

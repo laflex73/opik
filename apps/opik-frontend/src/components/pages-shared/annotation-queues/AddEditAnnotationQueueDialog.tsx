@@ -126,7 +126,7 @@ const AddEditAnnotationQueueDialog: React.FunctionComponent<
         onQueueCreated(queue);
       }
 
-      // TODO Lala: Remove this
+      // TODO lala: Remove this
       toast({
         title: "Annotation queue created",
         description: "SOME DESCRIPTION",
