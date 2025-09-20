@@ -248,19 +248,63 @@ class ProjectServiceImpl implements ProjectService {
 
         String workspaceId = requestContext.get().getWorkspaceId();
 
-        List<UUID> projectIds = find(page, size, criteria, sortingFields)
-                .content()
-                .stream()
-                .map(Project::id)
-                .toList();
+        // Check if sorting is by metrics fields (from ClickHouse) or database fields (from MySQL)
+        boolean hasMetricsSorting = sortingFields.stream()
+                .anyMatch(field -> field.field().startsWith("duration")
+                        || field.field().equals("total_estimated_cost_sum"));
+
+        List<UUID> projectIds;
+
+        if (hasMetricsSorting) {
+            // For metrics sorting: get all projects first (without sorting), then sort by statistics
+            List<SortingField> basicSortingFields = sortingFields.stream()
+                    .filter(field -> !field.field().startsWith("duration")
+                            && !field.field().equals("total_estimated_cost_sum"))
+                    .toList();
+
+            projectIds = find(page, size, criteria, basicSortingFields)
+                    .content().stream().map(Project::id).toList();
+        } else {
+            // For basic field sorting: use existing logic
+            projectIds = find(page, size, criteria, sortingFields)
+                    .content().stream().map(Project::id).toList();
+        }
 
         Map<UUID, Map<String, Object>> projectStats = getProjectStats(projectIds, workspaceId);
 
+        List<ProjectStatsSummaryItem> items = projectIds.stream()
+                .map(projectId -> getStats(projectId, projectStats.get(projectId)))
+                .collect(Collectors.toList());
+
+        // Apply application-level sorting for metrics fields
+        if (hasMetricsSorting && !sortingFields.isEmpty()) {
+            SortingField metricSortField = sortingFields.stream()
+                    .filter(field -> field.field().startsWith("duration")
+                            || field.field().equals("total_estimated_cost_sum"))
+                    .findFirst()
+                    .orElse(null);
+
+            if (metricSortField != null) {
+                String fieldName = metricSortField.field();
+                Direction direction = metricSortField.direction();
+
+                items.sort((item1, item2) -> {
+                    Double value1 = getMetricValue(item1, fieldName);
+                    Double value2 = getMetricValue(item2, fieldName);
+
+                    // Handle null values (put them last)
+                    if (value1 == null && value2 == null) return 0;
+                    if (value1 == null) return 1;
+                    if (value2 == null) return -1;
+
+                    int comparison = Double.compare(value1, value2);
+                    return direction == Direction.DESC ? -comparison : comparison;
+                });
+            }
+        }
+
         return ProjectStatsSummary.builder()
-                .content(
-                        projectIds.stream()
-                                .map(projectId -> getStats(projectId, projectStats.get(projectId)))
-                                .toList())
+                .content(items)
                 .build();
     }
 
@@ -284,6 +328,18 @@ class ProjectServiceImpl implements ProjectService {
                 .guardrailsFailedCount(StatsMapper.getStatsGuardrailsFailedCount(projectStats))
                 .errorCount(StatsMapper.getStatsErrorCount(projectStats))
                 .build();
+    }
+
+    private Double getMetricValue(ProjectStatsSummaryItem item, String fieldName) {
+        if (fieldName.equals("total_estimated_cost_sum")) {
+            return item.totalEstimatedCostSum();
+        } else if (fieldName.startsWith("duration")) {
+            // Handle duration.p50 field
+            return item.duration() != null && item.duration().p50() != null
+                    ? item.duration().p50().doubleValue()
+                    : null;
+        }
+        return null;
     }
 
     @Override
