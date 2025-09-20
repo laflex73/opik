@@ -104,6 +104,7 @@ const ProjectsPage: React.FunctionComponent = () => {
         type: COLUMN_TYPE.duration,
         accessorFn: (row) => row.duration?.p50,
         cell: DurationCell as never,
+        sortable: true,
       },
       {
         id: "duration.p90",
@@ -124,6 +125,7 @@ const ProjectsPage: React.FunctionComponent = () => {
         label: "Total cost",
         type: COLUMN_TYPE.cost,
         cell: CostCell as never,
+        sortable: true,
       },
       {
         id: "trace_count",
