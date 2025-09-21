@@ -21,23 +21,26 @@ type UseProjectsListResponse = {
   total: number;
 };
 
-const getProjectsList = async (
-  { signal }: QueryFunctionContext,
-  { workspaceName, search, sorting, size, page }: UseProjectsListParams,
-) => {
-  const { data } = await api.get(PROJECTS_REST_ENDPOINT, {
-    signal,
-    params: {
-      workspace_name: workspaceName,
-      ...processSorting(sorting),
+  const getProjectsList = async (
+    { signal }: QueryFunctionContext,
+    { workspaceName, search, sorting, size, page }: UseProjectsListParams,
+  ) => {
+    const sortingResult = processSorting(sorting);
+
+    const requestParams = {
+      ...sortingResult,
       ...(search && { name: search }),
       size,
       page,
-    },
-  });
+    };
 
-  return data;
-};
+    const { data } = await api.get(PROJECTS_REST_ENDPOINT, {
+      signal,
+      params: requestParams,
+    });
+
+    return data;
+  };
 
 export default function useProjectsList(
   params: UseProjectsListParams,

@@ -253,58 +253,118 @@ class ProjectServiceImpl implements ProjectService {
                 .anyMatch(field -> field.field().startsWith("duration")
                         || field.field().equals("total_estimated_cost_sum"));
 
-        List<UUID> projectIds;
-
         if (hasMetricsSorting) {
-            // For metrics sorting: get all projects first (without sorting), then sort by statistics
-            List<SortingField> basicSortingFields = sortingFields.stream()
-                    .filter(field -> !field.field().startsWith("duration")
-                            && !field.field().equals("total_estimated_cost_sum"))
-                    .toList();
-
-            projectIds = find(page, size, criteria, basicSortingFields)
-                    .content().stream().map(Project::id).toList();
+            // Use database-level sorting for metrics (proper pagination)
+            return getStatsWithMetricsSorting(page, size, criteria, sortingFields, workspaceId);
         } else {
-            // For basic field sorting: use existing logic
-            projectIds = find(page, size, criteria, sortingFields)
-                    .content().stream().map(Project::id).toList();
+            // Use existing MySQL-based sorting
+            return getStatsWithBasicSorting(page, size, criteria, sortingFields, workspaceId);
         }
+    }
+
+    private ProjectStatsSummary getStatsWithBasicSorting(int page, int size, @NonNull ProjectCriteria criteria,
+            @NonNull List<SortingField> sortingFields, String workspaceId) {
+
+        List<Project> projects = find(page, size, criteria, sortingFields).content();
+        List<UUID> projectIds = projects.stream().map(Project::id).toList();
 
         Map<UUID, Map<String, Object>> projectStats = getProjectStats(projectIds, workspaceId);
 
-        List<ProjectStatsSummaryItem> items = projectIds.stream()
-                .map(projectId -> getStats(projectId, projectStats.get(projectId)))
-                .collect(Collectors.toList());
+        List<ProjectStatsSummaryItem> items = projects.stream()
+                .map(project -> getStats(project, projectStats.get(project.id())))
+                .toList();
 
-        // Apply application-level sorting for metrics fields
-        if (hasMetricsSorting && !sortingFields.isEmpty()) {
-            SortingField metricSortField = sortingFields.stream()
-                    .filter(field -> field.field().startsWith("duration")
-                            || field.field().equals("total_estimated_cost_sum"))
-                    .findFirst()
-                    .orElse(null);
-
-            if (metricSortField != null) {
-                String fieldName = metricSortField.field();
-                Direction direction = metricSortField.direction();
-
-                items.sort((item1, item2) -> {
-                    Double value1 = getMetricValue(item1, fieldName);
-                    Double value2 = getMetricValue(item2, fieldName);
-
-                    // Handle null values (put them last)
-                    if (value1 == null && value2 == null) return 0;
-                    if (value1 == null) return 1;
-                    if (value2 == null) return -1;
-
-                    int comparison = Double.compare(value1, value2);
-                    return direction == Direction.DESC ? -comparison : comparison;
-                });
-            }
-        }
+        // Get total count for pagination
+        int total = countByProjectCriteria(criteria);
 
         return ProjectStatsSummary.builder()
                 .content(items)
+                .page(page)
+                .size(size)
+                .total(total)
+                .sortableBy(List.of("name", "total_estimated_cost_sum", "duration.p50", "duration.p90",
+                        "duration.p99"))
+                .build();
+    }
+
+    private ProjectStatsSummary getStatsWithMetricsSorting(int page, int size, @NonNull ProjectCriteria criteria,
+            @NonNull List<SortingField> sortingFields, String workspaceId) {
+
+        // Step 1: Get ALL projects that match criteria (no pagination yet)
+        List<Project> allProjects = getAllProjectsByCriteria(criteria, workspaceId);
+
+        if (allProjects.isEmpty()) {
+            return ProjectStatsSummary.builder()
+                    .content(List.of())
+                    .page(page)
+                    .size(size)
+                    .total(0)
+                    .sortableBy(List.of("name", "total_estimated_cost_sum", "duration.p50", "duration.p90",
+                            "duration.p99"))
+                    .build();
+        }
+
+        // Step 2: Get metrics for ALL projects
+        List<UUID> allProjectIds = allProjects.stream().map(Project::id).toList();
+        Map<UUID, Map<String, Object>> allProjectStats = getProjectStats(allProjectIds, workspaceId);
+
+        // Handle null case for allProjectStats
+        final Map<UUID, Map<String, Object>> finalProjectStats = allProjectStats != null ? allProjectStats : Map.of();
+
+        // Step 3: Convert to list and sort by metrics
+        // Include ALL projects, even those without traces (they'll have empty stats)
+        List<ProjectStatsSummaryItem> allItems = allProjects.stream()
+                .map(project -> {
+                    Map<String, Object> projectStats = finalProjectStats.get(project.id());
+                    // Use empty map if no stats available for this project
+                    if (projectStats == null) {
+                        projectStats = Map.of();
+                    }
+                    return getStats(project, projectStats); // Use Project object to get name
+                })
+                .collect(Collectors.toList());
+
+        // Step 4: Apply database-level equivalent sorting
+        SortingField metricSortField = sortingFields.stream()
+                .filter(field -> field.field().startsWith("duration")
+                        || field.field().equals("total_estimated_cost_sum"))
+                .findFirst()
+                .orElse(null);
+
+        if (metricSortField != null) {
+            String fieldName = metricSortField.field();
+            Direction direction = metricSortField.direction();
+
+            allItems.sort((item1, item2) -> {
+                Double value1 = getMetricValue(item1, fieldName);
+                Double value2 = getMetricValue(item2, fieldName);
+
+                // Handle null values (put them last in both ASC and DESC)
+                if (value1 == null && value2 == null) return 0;
+                if (value1 == null) return 1;
+                if (value2 == null) return -1;
+
+                int comparison = Double.compare(value1, value2);
+                return direction == Direction.DESC ? -comparison : comparison;
+            });
+        }
+
+        // Step 5: Apply pagination to the sorted results
+        int total = allItems.size();
+        int fromIndex = (page - 1) * size; // Convert from 1-based to 0-based indexing
+        int toIndex = Math.min(fromIndex + size, total);
+
+        List<ProjectStatsSummaryItem> paginatedItems = fromIndex < total
+                ? allItems.subList(fromIndex, toIndex)
+                : List.of();
+
+        return ProjectStatsSummary.builder()
+                .content(paginatedItems)
+                .page(page)
+                .size(size)
+                .total(total)
+                .sortableBy(List.of("name", "total_estimated_cost_sum", "duration.p50", "duration.p90",
+                        "duration.p99"))
                 .build();
     }
 
@@ -316,9 +376,10 @@ class ProjectServiceImpl implements ProjectService {
         Project project = get(projectId);
     }
 
-    private ProjectStatsSummaryItem getStats(UUID projectId, Map<String, Object> projectStats) {
+    private ProjectStatsSummaryItem getStats(Project project, Map<String, Object> projectStats) {
         return ProjectStatsSummaryItem.builder()
-                .projectId(projectId)
+                .projectId(project.id())
+                .name(project.name())
                 .feedbackScores(StatsMapper.getStatsFeedbackScores(projectStats))
                 .duration(StatsMapper.getStatsDuration(projectStats))
                 .totalEstimatedCost(StatsMapper.getStatsTotalEstimatedCost(projectStats))
@@ -330,16 +391,51 @@ class ProjectServiceImpl implements ProjectService {
                 .build();
     }
 
+    private List<Project> getAllProjectsByCriteria(@NonNull ProjectCriteria criteria, String workspaceId) {
+        Visibility visibility = requestContext.get().getVisibility();
+
+        return template.inTransaction(READ_ONLY, handle -> {
+            ProjectDAO repository = handle.attach(ProjectDAO.class);
+            return repository.getAllProjectIdsLastUpdated(workspaceId, criteria.projectName(), visibility)
+                    .stream()
+                    .map(projectIdLastUpdated -> {
+                        try {
+                            return repository.fetch(projectIdLastUpdated.id(), workspaceId).orElse(null);
+                        } catch (Exception e) {
+                            // Log error but continue processing other projects
+                            log.warn("Failed to fetch project with id: {}", projectIdLastUpdated.id(), e);
+                            return null;
+                        }
+                    })
+                    .filter(project -> project != null) // Filter out any null projects
+                    .toList();
+        });
+    }
+
+    private int countByProjectCriteria(@NonNull ProjectCriteria criteria) {
+        String workspaceId = requestContext.get().getWorkspaceId();
+        Visibility visibility = requestContext.get().getVisibility();
+
+        return template.inTransaction(READ_ONLY, handle -> {
+            ProjectDAO repository = handle.attach(ProjectDAO.class);
+            return (int) repository.findCount(workspaceId, criteria.projectName(), visibility);
+        });
+    }
+
     private Double getMetricValue(ProjectStatsSummaryItem item, String fieldName) {
-        if (fieldName.equals("total_estimated_cost_sum")) {
-            return item.totalEstimatedCostSum();
-        } else if (fieldName.startsWith("duration")) {
-            // Handle duration.p50 field
-            return item.duration() != null && item.duration().p50() != null
+        return switch (fieldName) {
+            case "total_estimated_cost_sum" -> item.totalEstimatedCostSum();
+            case "duration.p50" -> item.duration() != null && item.duration().p50() != null
                     ? item.duration().p50().doubleValue()
                     : null;
-        }
-        return null;
+            case "duration.p90" -> item.duration() != null && item.duration().p90() != null
+                    ? item.duration().p90().doubleValue()
+                    : null;
+            case "duration.p99" -> item.duration() != null && item.duration().p99() != null
+                    ? item.duration().p99().doubleValue()
+                    : null;
+            default -> null;
+        };
     }
 
     @Override

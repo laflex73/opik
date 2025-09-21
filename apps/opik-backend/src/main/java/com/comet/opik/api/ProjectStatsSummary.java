@@ -12,13 +12,19 @@ import java.util.UUID;
 @Builder(toBuilder = true)
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public record ProjectStatsSummary(List<ProjectStatsSummaryItem> content) {
+public record ProjectStatsSummary(
+        List<ProjectStatsSummaryItem> content,
+        int page,
+        int size,
+        long total,
+        List<String> sortableBy) {
 
     @Builder(toBuilder = true)
     @JsonIgnoreProperties(ignoreUnknown = true)
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record ProjectStatsSummaryItem(
             UUID projectId,
+            String name,
             List<FeedbackScoreAverage> feedbackScores,
             PercentageValues duration,
             Double totalEstimatedCost,

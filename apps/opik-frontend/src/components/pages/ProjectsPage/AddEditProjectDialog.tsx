@@ -39,9 +39,9 @@ const AddEditProjectDialog: React.FC<AddEditProjectDialogProps> = ({
 
   const { mutate: createMutate } = useProjectCreateMutation();
   const { mutate: updateMutate } = useProjectUpdateMutation();
-  const [name, setName] = useState(project ? project.name : "");
+  const [name, setName] = useState(project?.name || "");
   const [description, setDescription] = useState(
-    project ? project.description : "",
+    project?.description || "",
   );
 
   const isEdit = Boolean(project);

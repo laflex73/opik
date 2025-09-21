@@ -100,10 +100,11 @@ public class ProjectsResource {
         List<SortingField> sortingFields = sortingFactory.newSorting(sorting);
 
         log.info("Find projects by '{}' on workspaceId '{}'", criteria, workspaceId);
-        Page<Project> projectPage = projectService.find(page, size, criteria, sortingFields);
-        log.info("Found projects by '{}', count '{}' on workspaceId '{}'", criteria, projectPage.size(), workspaceId);
+        Page<Project> projectsPage = projectService.find(page, size, criteria, sortingFields);
+        log.info("Found projects by '{}', count '{}' on workspaceId '{}'", criteria, projectsPage.size(),
+                workspaceId);
 
-        return Response.ok().entity(projectPage).build();
+        return Response.ok(projectsPage).build();
     }
 
     @GET
